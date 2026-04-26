@@ -1,0 +1,825 @@
+<!DOCTYPE html>
+<!--
+  ============================================================================
+  ✈ Travel Note 模板 v1.0
+  ----------------------------------------------------------------------------
+  純前端旅遊行程模板，無需後端。功能：
+    • 行程時間軸（可編輯、可拖曳排序、有 Undo）
+    • 互動地圖（Leaflet + OpenStreetMap，免 API key）
+    • 天氣預報（Open-Meteo API，免 API key、免註冊）
+    • 資料儲存於瀏覽器 localStorage（每位訪客各自獨立）
+
+  要修改的地方只有兩處：
+    1. <script> 最上面的「⚙ CONFIG 設定區」
+    2. 「📋 預設行程資料」區塊的 DEFAULT_ITINERARY 與 SPOTS
+
+  其他程式邏輯不需要動。
+  ============================================================================
+-->
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>✈ Travel Note · 我的旅程</title>
+
+<!-- 字體：Noto Serif TC（內文）+ Klee One（手寫風標題） -->
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@300;400;600;700&family=Klee+One:wght@400;600&display=swap" rel="stylesheet">
+
+<!-- Leaflet 地圖套件（CSS 必須在 JS 之前） -->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+
+<style>
+/* ─────────────────────────────────────────────────────────────
+   設計變數（可調整整體配色）
+   ───────────────────────────────────────────────────────────── */
+:root{
+  --orange:#E8642A;     /* 主色 */
+  --orange-dim:#fde8df;
+  --cream:#FAF7F2;      /* 背景 */
+  --cream-dark:#f0ebe2;
+  --surface:#fdfaf6;
+  --border:rgba(28,16,8,.10);
+  --ash:#9a8878;        /* 次要文字 */
+  --ash-light:#cfc4b8;
+  --white:#fff;
+  --gold:#c8860a;
+  --ink:#1C1008;        /* 主要文字 */
+  --green:#5a8a5a;
+  --blue:#2a6a9a;
+  --shadow:0 2px 12px rgba(28,16,8,.08);
+  --shadow-lg:0 8px 32px rgba(28,16,8,.14);
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Noto Serif TC',serif;background:var(--cream);color:var(--ink);min-height:100vh}
+input,select{font-family:inherit}
+
+/* ─────────────────────────────────────────────────────────────
+   頁首
+   ───────────────────────────────────────────────────────────── */
+header{position:sticky;top:0;z-index:300;background:rgba(250,247,242,.96);backdrop-filter:blur(12px);border-bottom:1.5px solid var(--border);padding:0 16px;height:54px;display:flex;align-items:center;gap:10px}
+.logo{font-family:'Klee One',cursive;font-size:17px;font-weight:800;color:var(--orange)}
+.logo span{font-size:11px;color:var(--ash);font-weight:400;margin-left:6px}
+.header-btns{margin-left:auto;display:flex;gap:6px}
+.btn-edit{background:var(--orange);color:#fff;border:none;border-radius:8px;padding:6px 14px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+.btn-edit:hover{opacity:.9}
+
+/* ─────────────────────────────────────────────────────────────
+   分頁切換
+   ───────────────────────────────────────────────────────────── */
+.tabs{display:flex;border-bottom:1.5px solid var(--border);background:var(--white);position:sticky;top:54px;z-index:200}
+.tab{flex:1;padding:11px 0;text-align:center;font-size:13px;cursor:pointer;color:var(--ash);border:none;background:none;font-family:inherit;border-bottom:2.5px solid transparent;transition:all .15s}
+.tab.active{color:var(--orange);border-bottom-color:var(--orange);font-weight:600}
+
+/* ─────────────────────────────────────────────────────────────
+   版面
+   ───────────────────────────────────────────────────────────── */
+.page{display:none}
+.page.active{display:block}
+main{max-width:900px;margin:0 auto;padding:20px 14px 60px}
+
+/* ─────────────────────────────────────────────────────────────
+   天氣列
+   ───────────────────────────────────────────────────────────── */
+.weather-bar{display:grid;gap:8px;margin-bottom:20px}
+.weather-day{background:var(--white);border:1.5px solid var(--border);border-radius:12px;padding:10px 8px;text-align:center;box-shadow:var(--shadow)}
+.weather-day .w-date{font-size:11px;color:var(--ash);margin-bottom:4px}
+.weather-day .w-icon{font-size:24px;margin-bottom:4px}
+.weather-day .w-temp{font-size:13px;font-weight:600}
+.weather-day .w-desc{font-size:10px;color:var(--ash);margin-top:2px}
+.weather-day .w-rain{font-size:10px;color:var(--blue);margin-top:1px}
+
+/* ─────────────────────────────────────────────────────────────
+   日期篩選 chip
+   ───────────────────────────────────────────────────────────── */
+.day-filter{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:16px}
+.day-chip{border-radius:20px;font-size:12px;cursor:pointer;border:1.5px solid var(--border);background:var(--surface);color:var(--ash);font-family:inherit;padding:5px 12px;transition:all .15s}
+.day-chip.active{background:var(--orange);color:#fff;border-color:var(--orange)}
+
+/* ─────────────────────────────────────────────────────────────
+   地圖頁版面（固定高度，避免捲動穿透）
+   ───────────────────────────────────────────────────────────── */
+#page-map.active{display:flex;flex-direction:column;height:calc(100vh - 98px);overflow:hidden}
+#page-map main{display:flex;flex-direction:column;flex:1;overflow:hidden;padding:12px 14px 0;max-width:900px;margin:0 auto;width:100%}
+#page-map .day-filter{flex-shrink:0}
+#spot-list{flex:1;overflow-y:auto;padding-bottom:20px;display:flex;flex-direction:column;gap:8px}
+
+/* ─────────────────────────────────────────────────────────────
+   地圖樣式
+   ───────────────────────────────────────────────────────────── */
+#map{height:clamp(180px,38vh,340px);border-radius:14px;border:1.5px solid var(--border);margin-bottom:12px;box-shadow:var(--shadow);flex-shrink:0}
+.leaflet-popup-content-wrapper{font-family:'Noto Serif TC',serif;border-radius:10px;box-shadow:var(--shadow-lg)}
+.leaflet-popup-content{font-size:13px;line-height:1.5}
+.popup-icon{font-size:18px;margin-bottom:2px}
+.popup-name{font-weight:700;margin-bottom:2px}
+.popup-sub{font-size:11px;color:var(--ash)}
+.popup-day{display:inline-block;font-size:10px;padding:2px 7px;border-radius:10px;color:#fff;margin-top:4px}
+
+/* ─────────────────────────────────────────────────────────────
+   時間軸
+   ───────────────────────────────────────────────────────────── */
+.timeline{position:relative;padding-left:36px}
+.timeline-line{position:absolute;left:10px;top:0;bottom:0;width:2px;background:linear-gradient(180deg,var(--orange),var(--gold));border-radius:1px}
+.day-block{position:relative;margin-bottom:28px}
+.day-dot{position:absolute;left:-28px;top:8px;width:12px;height:12px;border-radius:50%;background:var(--orange);border:2px solid var(--cream);box-shadow:0 0 0 2px var(--orange)}
+.day-header{font-family:'Klee One',cursive;font-size:19px;margin-bottom:2px}
+.day-region{font-size:12px;color:var(--ash);margin-bottom:10px}
+.activities{display:flex;flex-direction:column;gap:6px}
+.activity{background:var(--white);border:1.5px solid var(--border);border-radius:12px;padding:10px 14px;display:flex;align-items:flex-start;gap:10px;box-shadow:var(--shadow);cursor:pointer;transition:border-color .15s}
+.activity:hover{border-color:var(--orange)}
+.activity.has-map{border-left:3px solid var(--orange)}
+.activity-icon{font-size:18px;width:32px;height:32px;display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.activity-name{font-size:13px;font-weight:600}
+.activity-sub{font-size:11px;color:var(--ash);margin-top:2px}
+.map-badge{font-size:10px;color:var(--orange);margin-top:3px}
+
+/* ─────────────────────────────────────────────────────────────
+   編輯器 Modal
+   ───────────────────────────────────────────────────────────── */
+.modal-overlay{display:none;position:fixed;inset:0;z-index:400;background:rgba(28,16,8,.45);backdrop-filter:blur(4px);align-items:flex-start;justify-content:center;padding:16px;overflow-y:auto}
+.modal-overlay.open{display:flex}
+.editor-box{background:var(--white);border-radius:20px;width:100%;max-width:660px;padding:20px;box-shadow:var(--shadow-lg);margin:auto}
+.editor-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.editor-title{font-family:'Klee One',cursive;font-size:20px}
+.editor-actions{display:flex;gap:6px}
+.btn-ghost{background:none;border:1.5px solid var(--border);border-radius:8px;padding:6px 12px;font-size:12px;color:var(--ash);cursor:pointer;font-family:inherit}
+.btn-ghost:disabled{opacity:.4;cursor:default}
+.btn-save{background:var(--orange);color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
+.hint{font-size:11px;color:var(--ash);margin-bottom:14px}
+.day-card{background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:14px;margin-bottom:10px}
+.day-fields{display:grid;grid-template-columns:44px 60px 96px 1fr 32px;gap:6px;align-items:center;margin-bottom:10px}
+.field-inp{width:100%;padding:6px 7px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--white);outline:none;font-family:inherit;transition:border-color .15s}
+.field-inp:focus{border-color:var(--orange)}
+.emoji-inp{width:34px;min-height:32px;border:1.5px solid var(--border);border-radius:8px;font-size:16px;text-align:center;background:var(--surface);outline:none;cursor:text;display:flex;align-items:center;justify-content:center;transition:border-color .15s}
+.emoji-inp:focus{border-color:var(--orange)}
+.act-row{display:grid;grid-template-columns:20px 34px 1fr 1fr 28px 28px;gap:5px;align-items:center;margin-bottom:5px}
+.drag-handle{color:var(--ash-light);font-size:14px;text-align:center;cursor:grab;user-select:none}
+.act-up-btn{background:none;border:1px solid var(--border);border-radius:6px;font-size:12px;cursor:pointer;color:var(--ash);width:28px;height:28px;display:flex;align-items:center;justify-content:center}
+.act-up-btn:disabled{opacity:.3;cursor:default}
+.act-del-btn{background:none;border:none;cursor:pointer;font-size:14px;color:var(--ash-light);width:28px;height:28px;display:flex;align-items:center;justify-content:center}
+.act-del-btn:hover{color:#c0442a}
+.add-activity-btn{width:100%;background:none;border:1.5px dashed var(--ash-light);border-radius:8px;padding:6px;font-size:12px;color:var(--ash);cursor:pointer;font-family:inherit;margin-top:4px;transition:all .15s}
+.add-activity-btn:hover{border-color:var(--orange);color:var(--orange)}
+.add-day-btn{width:100%;background:none;border:2px dashed var(--orange);border-radius:12px;padding:10px;font-size:13px;color:var(--orange);cursor:pointer;font-family:inherit}
+.del-day-btn{background:none;border:none;font-size:16px;cursor:pointer;color:var(--ash-light);width:32px;text-align:center}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">✈ Travel Note <span id="header-subtitle">2026 · 京都櫻花</span></div>
+  <div class="header-btns">
+    <!-- 編輯按鈕：開啟編輯器 Modal。不需要編輯功能可直接刪掉這顆按鈕 -->
+    <button class="btn-edit" onclick="openEditor()">✏️ 編輯</button>
+  </div>
+</header>
+
+<div class="tabs">
+  <button class="tab active" onclick="switchTab('timeline',this)">🗓 行程</button>
+  <button class="tab" onclick="switchTab('map',this)">🗺 地圖</button>
+</div>
+
+<!-- 行程頁 -->
+<div id="page-timeline" class="page active">
+  <main>
+    <div class="weather-bar" id="weather-bar"></div>
+    <div class="timeline">
+      <div class="timeline-line"></div>
+      <div id="timeline-body"></div>
+    </div>
+  </main>
+</div>
+
+<!-- 地圖頁 -->
+<div id="page-map" class="page">
+  <main>
+    <div class="day-filter" id="day-filter"></div>
+    <div id="map"></div>
+    <div id="spot-list"></div>
+  </main>
+</div>
+
+<!-- 編輯器 Modal -->
+<div class="modal-overlay" id="editorModal">
+  <div class="editor-box">
+    <div class="editor-header">
+      <div class="editor-title">✏️ 編輯行程</div>
+      <div class="editor-actions">
+        <button class="btn-ghost" id="undo-btn" onclick="undoEdit()" disabled>↩ 上一步</button>
+        <button class="btn-ghost" onclick="discardEditor()">✕ 取消</button>
+        <button class="btn-save" onclick="saveEditor()">✓ 儲存</button>
+      </div>
+    </div>
+    <p class="hint">⠿ 可拖曳排序，↑ 可上移，修改後按「儲存」才會生效</p>
+    <div id="editor-body"></div>
+    <button class="add-day-btn" onclick="addDay()">＋ 新增一天</button>
+  </div>
+</div>
+
+<script>
+// ╔═══════════════════════════════════════════════════════════════════════════╗
+// ║                                                                           ║
+// ║   ⚙ CONFIG 設定區  ←── 主要修改這裡                                       ║
+// ║                                                                           ║
+// ╚═══════════════════════════════════════════════════════════════════════════╝
+
+const CONFIG = {
+  // 頁面標題（瀏覽器分頁顯示）
+  pageTitle: '✈ Travel Note · 京都櫻花',
+
+  // 頁首副標題（出現在 logo 後面）
+  headerSubtitle: '2026 · 京都櫻花',
+
+  // localStorage 用的 key，每個專案請取不同名稱避免互相覆蓋
+  storageKey: 'tn_kyoto_2026',
+
+  // 旅程日期範圍（用於天氣 API 查詢，格式必須是 YYYY-MM-DD）
+  // ⚠ Open-Meteo 只能查詢「過去」與「未來 16 天」，太早或太遠的日期會失敗（會自動 fallback）
+  weatherStartDate: '2026-04-01',
+  weatherEndDate:   '2026-04-03',
+
+  // 旅程目的地的中心座標（用於天氣 API；地圖會自動依景點縮放，不受此影響）
+  weatherLatitude:  35.0116,    // 京都
+  weatherLongitude: 135.7681,
+
+  // 每日色彩主題（地圖 marker 顏色、chip 顏色）
+  // 有幾天行程就準備幾個顏色；不夠會自動循環使用
+  dayColors: ['#E8642A', '#5a8a5a', '#2a6a9a', '#c8860a', '#7b5ea7'],
+
+  // 天氣 fallback（API 失敗時顯示這份；通常用歷史平均值）
+  // date 格式建議「M/D」、day 格式建議「Day N」
+  weatherFallback: [
+    {date:'4/1', day:'Day 1', icon:'🌸', high:18, low:9,  desc:'晴', rain:'降雨機率 20%'},
+    {date:'4/2', day:'Day 2', icon:'⛅', high:17, low:10, desc:'多雲', rain:'降雨機率 30%'},
+    {date:'4/3', day:'Day 3', icon:'🌦', high:16, low:9,  desc:'多雲偶雨', rain:'降雨機率 50%'},
+  ],
+};
+
+// ╔═══════════════════════════════════════════════════════════════════════════╗
+// ║                                                                           ║
+// ║   📋 預設行程資料  ←── 主要修改這裡                                       ║
+// ║                                                                           ║
+// ╚═══════════════════════════════════════════════════════════════════════════╝
+
+// ── SPOTS：景點座標表 ──
+// key 必須跟下面 DEFAULT_ITINERARY 裡 activity 的 name 完全一致（地圖才會出現該標記）
+// lat/lng 取得方式：Google Maps 在景點上「右鍵 → 第一行就是經緯度，點一下會複製」
+// hint 是地圖 popup 的補充說明，可省略
+const SPOTS = {
+  '清水寺':       { lat: 34.9949, lng: 135.7851, hint: '京都最古老寺院之一' },
+  '伏見稻荷大社': { lat: 34.9671, lng: 135.7727, hint: '千本鳥居' },
+  '嵐山竹林':     { lat: 35.0170, lng: 135.6716 },
+  '渡月橋':       { lat: 35.0128, lng: 135.6779 },
+  '%Arabica 嵐山': { lat: 35.0136, lng: 135.6770, hint: '人氣咖啡廳' },
+  '金閣寺':       { lat: 35.0394, lng: 135.7292 },
+  '錦市場':       { lat: 35.0050, lng: 135.7651, hint: '京都廚房' },
+};
+
+// ── DEFAULT_ITINERARY：預設行程 ──
+// 結構：[ {一天}, {一天}, ... ]
+// 每天：{ id, day, date, region, icon, activities: [...] }
+// 每個 activity：{ id, icon, name, sub, url?, urlLabel?, urls?: [{href,label},...] }
+//
+// id 隨意，但必須在這個陣列內 unique。可用 'd1' 'd2' 'a1' 'a2' 這種短碼。
+// name 如果剛好等於 SPOTS 裡的 key，地圖頁就會顯示對應標記。
+const DEFAULT_ITINERARY = [
+  { id:'d1', day:'Day 1', date:'4/1 (三)', region:'京都市區', icon:'🌸', activities:[
+    { id:'a1', icon:'✈️', name:'抵達關西機場',   sub:'CI 156｜桃園 → 關西 09:30' },
+    { id:'a2', icon:'🚄', name:'HARUKA 特急到京都', sub:'約 75 分鐘' },
+    { id:'a3', icon:'⛩',  name:'清水寺', sub:'下午散步、和服體驗',
+      url:'https://www.kiyomizudera.or.jp/', urlLabel:'🌐 官網' },
+    { id:'a4', icon:'🍜', name:'晚餐：先斗町', sub:'京都老街、河岸景觀' },
+  ]},
+  { id:'d2', day:'Day 2', date:'4/2 (四)', region:'伏見・嵐山', icon:'🦊', activities:[
+    { id:'b1', icon:'⛩',  name:'伏見稻荷大社', sub:'07:00 抵達避開人潮' },
+    { id:'b2', icon:'🎋', name:'嵐山竹林', sub:'徒步穿越竹林小徑' },
+    { id:'b3', icon:'🌉', name:'渡月橋', sub:'嵐山標誌風景' },
+    { id:'b4', icon:'☕', name:'%Arabica 嵐山', sub:'外帶咖啡看河景' },
+  ]},
+  { id:'d3', day:'Day 3', date:'4/3 (五)', region:'金閣・市區', icon:'✨', activities:[
+    { id:'c1', icon:'🏯', name:'金閣寺', sub:'清晨光線最美' },
+    { id:'c2', icon:'🛍', name:'錦市場', sub:'伴手禮、街邊小吃' },
+    { id:'c3', icon:'✈️', name:'返程關西機場', sub:'CI 157｜關西 18:00 → 桃園' },
+  ]},
+];
+
+// ╔═══════════════════════════════════════════════════════════════════════════╗
+// ║                                                                           ║
+// ║   ⬇ 以下程式邏輯區，不需要修改                                            ║
+// ║                                                                           ║
+// ╚═══════════════════════════════════════════════════════════════════════════╝
+
+// ── 套用 CONFIG 到 DOM ──
+document.title = CONFIG.pageTitle;
+document.getElementById('header-subtitle').textContent = CONFIG.headerSubtitle;
+
+// 動態設定 weather-bar 的欄位數（依 fallback 天數）
+document.getElementById('weather-bar').style.gridTemplateColumns =
+  `repeat(${CONFIG.weatherFallback.length}, 1fr)`;
+
+// ── 天氣 API：WMO weather code 對應表 ──
+// 參考：https://open-meteo.com/en/docs（WMO Weather interpretation codes）
+const WMO_MAP = {
+  0:['☀️','晴'], 1:['🌤','晴時多雲'], 2:['⛅','多雲'], 3:['☁️','陰'],
+  45:['🌫','霧'], 48:['🌫','霧'],
+  51:['🌦','毛毛雨'], 53:['🌦','毛毛雨'], 55:['🌧','毛毛雨'],
+  61:['🌧','小雨'], 63:['🌧','中雨'], 65:['🌧','大雨'],
+  71:['🌨','小雪'], 73:['🌨','中雪'], 75:['❄️','大雪'],
+  80:['🌦','陣雨'], 81:['🌧','陣雨'], 82:['⛈','大陣雨'],
+  95:['⛈','雷陣雨'], 96:['⛈','雷陣雨夾冰雹'], 99:['⛈','雷陣雨夾冰雹'],
+};
+
+let WEATHER = CONFIG.weatherFallback;
+
+// 從 Open-Meteo 抓即時天氣；失敗就靜默使用 fallback
+async function fetchWeather() {
+  try {
+    const url = 'https://api.open-meteo.com/v1/forecast'
+      + `?latitude=${CONFIG.weatherLatitude}&longitude=${CONFIG.weatherLongitude}`
+      + '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code'
+      + '&timezone=auto'
+      + `&start_date=${CONFIG.weatherStartDate}&end_date=${CONFIG.weatherEndDate}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    const d = data.daily;
+    if (!d || !d.time) throw new Error('No daily data');
+    const codes = d.weather_code || d.weathercode || [];
+    WEATHER = d.time.map((dateStr, i) => {
+      const code = codes[i];
+      const [icon, desc] = WMO_MAP[code] ?? ['🌡','—'];
+      const rain = d.precipitation_probability_max[i];
+      const dt = new Date(dateStr);
+      return {
+        date: `${dt.getMonth()+1}/${dt.getDate()}`,
+        day: `Day ${i+1}`,
+        icon,
+        high: Math.round(d.temperature_2m_max[i]),
+        low:  Math.round(d.temperature_2m_min[i]),
+        desc,
+        rain: rain != null ? `降雨機率 ${rain}%` : '—',
+        live: true,    // 標記為即時資料
+      };
+    });
+    renderWeather();
+  } catch(e) {
+    console.warn('天氣 API 失敗，使用歷史平均', e);
+  }
+}
+
+// ── localStorage 存取 ──
+function loadItinerary() {
+  try {
+    const s = localStorage.getItem(CONFIG.storageKey);
+    return s ? JSON.parse(s) : DEFAULT_ITINERARY;
+  } catch { return DEFAULT_ITINERARY; }
+}
+function saveItinerary(d) {
+  try { localStorage.setItem(CONFIG.storageKey, JSON.stringify(d)); } catch {}
+}
+
+// ── 全域狀態 ──
+let itinerary = loadItinerary();   // 目前的行程資料
+let draft = null;                  // 編輯器內的暫存（深拷貝）
+let history = [];                  // Undo 歷史堆疊（最多 30 筆）
+let map = null;                    // Leaflet 地圖物件
+let markers = [];                  // 地圖上的所有 marker
+let activeDay = 'all';             // 地圖頁目前篩選的天數（'all' 或 0,1,2...）
+
+// ── 分頁切換 ──
+function switchTab(tab, el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  el.classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + tab).classList.add('active');
+  if (tab === 'map') {
+    // 地圖容器尺寸在隱藏狀態下不正確，切過去後要重新計算
+    setTimeout(() => {
+      if (!map) initMap();
+      else { map.invalidateSize(); updateMap(activeDay); }
+    }, 100);
+  }
+}
+
+// ── 渲染天氣列 ──
+function renderWeather() {
+  const bar = document.getElementById('weather-bar');
+  bar.innerHTML = WEATHER.map(w => `
+    <div class="weather-day">
+      <div class="w-date"><b>${w.day}</b> ${w.date}</div>
+      <div class="w-icon">${w.icon}</div>
+      <div class="w-temp">${w.high}° / ${w.low}°</div>
+      <div class="w-desc">${w.desc}</div>
+      <div class="w-rain">${w.rain}</div>
+      ${w.live
+        ? `<div style="font-size:9px;color:var(--green);margin-top:2px">● 即時預報</div>`
+        : `<div style="font-size:9px;color:var(--ash-light);margin-top:2px">歷史平均</div>`}
+    </div>
+  `).join('');
+}
+
+// ── 渲染時間軸 ──
+function renderTimeline() {
+  const body = document.getElementById('timeline-body');
+  body.innerHTML = '';
+  itinerary.forEach(day => {
+    const block = document.createElement('div');
+    block.className = 'day-block';
+    const acts = day.activities.map(a => {
+      const spot = SPOTS[a.name];
+      // 主連結（單一 URL）
+      const mainLink = a.url
+        ? `<div class="map-badge"><a href="${a.url}" target="_blank" onclick="event.stopPropagation()" style="color:var(--orange);text-decoration:none;">${a.urlLabel || '🔗 連結'}</a></div>`
+        : '';
+      // 多連結（陣列）
+      const multiLinks = (a.urls || []).map(u =>
+        `<div class="map-badge"><a href="${u.href}" target="_blank" onclick="event.stopPropagation()" style="color:var(--orange);text-decoration:none;">${u.label}</a></div>`
+      ).join('');
+      // 點擊整個 activity → 跳到地圖頁該景點（只有有座標的才能點）
+      const clickHandler = spot
+        ? `onclick="jumpToSpot(${spot.lat},${spot.lng},'${a.name.replace(/'/g, "\\'")}')"`
+        : '';
+      return `<div class="activity${spot ? ' has-map' : ''}" ${clickHandler} style="${spot ? '' : 'cursor:default'}">
+        <div class="activity-icon">${a.icon}</div>
+        <div>
+          <div class="activity-name">${a.name}</div>
+          ${a.sub ? `<div class="activity-sub">${a.sub}</div>` : ''}
+          ${mainLink}
+          ${multiLinks}
+        </div>
+      </div>`;
+    }).join('');
+    block.innerHTML = `
+      <div class="day-dot"></div>
+      <div class="day-header">${day.day} ${day.date}</div>
+      <div class="day-region">${day.icon} ${day.region}</div>
+      <div class="activities">${acts}</div>
+    `;
+    body.appendChild(block);
+  });
+}
+
+// ── 從時間軸跳到地圖上的某個景點 ──
+function jumpToSpot(lat, lng, name) {
+  document.querySelectorAll('.tab')[1].click();   // 切到地圖頁
+  setTimeout(() => {
+    if (map) {
+      map.setView([lat, lng], 14, { animate: true });
+      markers.forEach(m => { if (m.options.title === name) m.openPopup(); });
+    }
+  }, 200);
+}
+
+// ── 地圖：依今天日期決定預設顯示哪一天 ──
+function getDefaultDay() {
+  // 如果是旅程期間中，自動跳到「今天」那一天的標記
+  // 旅程開始前或結束後，預設顯示全部
+  // 簡化版本：直接顯示全部
+  return 'all';
+}
+
+// ── 初始化地圖 ──
+function initMap() {
+  map = L.map('map', { zoomControl: true }).setView(
+    [CONFIG.weatherLatitude, CONFIG.weatherLongitude], 9
+  );
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+    maxZoom: 18
+  }).addTo(map);
+  activeDay = getDefaultDay();
+  renderDayFilter();
+  updateMap(activeDay);
+}
+
+// ── 渲染日期篩選 chips ──
+function renderDayFilter() {
+  const fil = document.getElementById('day-filter');
+  fil.innerHTML = '';
+  // 「全部」
+  const allBtn = document.createElement('button');
+  allBtn.className = 'day-chip' + (activeDay === 'all' ? ' active' : '');
+  allBtn.textContent = '全部';
+  allBtn.onclick = () => { activeDay = 'all'; renderDayFilter(); updateMap('all'); };
+  fil.appendChild(allBtn);
+  // 每一天
+  itinerary.forEach((day, di) => {
+    const color = CONFIG.dayColors[di % CONFIG.dayColors.length];
+    const btn = document.createElement('button');
+    btn.className = 'day-chip' + (activeDay === di ? ' active' : '');
+    btn.textContent = `${day.day} ${day.date}`;
+    if (activeDay === di) {
+      btn.style.borderColor = color;
+      btn.style.background = color;
+      btn.style.color = '#fff';
+    }
+    btn.onclick = () => { activeDay = di; renderDayFilter(); updateMap(di); };
+    fil.appendChild(btn);
+  });
+}
+
+// ── 更新地圖標記（依目前篩選） ──
+function updateMap(filter) {
+  if (!map) return;
+  markers.forEach(m => map.removeLayer(m));
+  markers = [];
+
+  const days = filter === 'all' ? itinerary : [itinerary[filter]];
+  const bounds = [];
+
+  days.forEach((day, localDi) => {
+    const di = filter === 'all' ? localDi : filter;
+    const color = CONFIG.dayColors[di % CONFIG.dayColors.length];
+    day.activities.forEach(a => {
+      const spot = SPOTS[a.name];
+      if (!spot) return;
+      bounds.push([spot.lat, spot.lng]);
+
+      // 自訂彩色圓形 marker
+      const icon = L.divIcon({
+        html: `<div style="
+          background:${color};color:#fff;border:2px solid #fff;
+          width:32px;height:32px;border-radius:50%;
+          display:flex;align-items:center;justify-content:center;
+          font-size:15px;box-shadow:0 2px 6px rgba(0,0,0,.3);
+          cursor:pointer;
+        ">${a.icon}</div>`,
+        className: '',
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+        popupAnchor: [0, -18],
+      });
+
+      const popup = `<div>
+        <div class="popup-icon">${a.icon}</div>
+        <div class="popup-name">${a.name}</div>
+        ${a.sub ? `<div class="popup-sub">${a.sub}</div>` : ''}
+        ${spot.hint ? `<div class="popup-sub">📍 ${spot.hint}</div>` : ''}
+        <div class="popup-day" style="background:${color}">${day.day} ${day.date} · ${day.region}</div>
+      </div>`;
+
+      const marker = L.marker([spot.lat, spot.lng], { icon, title: a.name })
+        .bindPopup(popup)
+        .addTo(map);
+      markers.push(marker);
+    });
+  });
+
+  // 自動縮放到所有標記的範圍
+  if (bounds.length > 0) {
+    if (bounds.length === 1) map.setView(bounds[0], 13);
+    else map.fitBounds(bounds, { padding: [40, 40] });
+  }
+
+  renderSpotList(filter);
+}
+
+// ── 渲染地圖下方的景點清單（單日才顯示） ──
+function renderSpotList(filter) {
+  const list = document.getElementById('spot-list');
+  list.innerHTML = '';
+  if (filter === 'all') { list.style.display = 'none'; return; }
+  list.style.display = 'flex';
+  const day = itinerary[filter];
+  const color = CONFIG.dayColors[filter % CONFIG.dayColors.length];
+  const header = document.createElement('div');
+  header.style.cssText = `font-family:'Klee One',cursive;font-size:15px;font-weight:700;color:${color};margin-bottom:6px`;
+  header.textContent = `${day.icon} ${day.day} ${day.date} · ${day.region}`;
+  list.appendChild(header);
+  day.activities.forEach(a => {
+    const spot = SPOTS[a.name];
+    const row = document.createElement('div');
+    row.style.cssText = 'display:flex;align-items:center;gap:10px;padding:8px 12px;background:var(--white);border:1.5px solid var(--border);border-radius:10px;margin-bottom:6px;cursor:' + (spot ? 'pointer' : 'default');
+    if (spot) {
+      row.style.borderLeft = `3px solid ${color}`;
+      row.onclick = () => {
+        map.setView([spot.lat, spot.lng], 14, { animate: true });
+        markers.forEach(m => { if (m.options.title === a.name) m.openPopup(); });
+      };
+    }
+    row.innerHTML = `<span style="font-size:18px">${a.icon}</span>
+      <div>
+        <div style="font-size:13px;font-weight:600">${a.name}</div>
+        ${a.sub ? `<div style="font-size:11px;color:var(--ash)">${a.sub}</div>` : ''}
+        ${spot ? `<div style="font-size:10px;color:${color};margin-top:2px">📍 地圖標記</div>` : ''}
+      </div>`;
+    list.appendChild(row);
+  });
+}
+
+// ── 編輯器 ──
+function openEditor() {
+  draft = JSON.parse(JSON.stringify(itinerary));   // 深拷貝
+  history = [];
+  renderEditor();
+  document.getElementById('editorModal').classList.add('open');
+}
+function pushHistory() {
+  history.push(JSON.parse(JSON.stringify(draft)));
+  if (history.length > 30) history.shift();
+  updateUndoBtn();
+}
+function undoEdit() {
+  if (!history.length) return;
+  draft = history.pop();
+  updateUndoBtn();
+  renderEditor();
+}
+function updateUndoBtn() {
+  document.getElementById('undo-btn').disabled = history.length === 0;
+}
+function saveEditor() {
+  itinerary = JSON.parse(JSON.stringify(draft));
+  saveItinerary(itinerary);
+  document.getElementById('editorModal').classList.remove('open');
+  renderTimeline();
+  if (map) {
+    markers.forEach(m => map.removeLayer(m));
+    markers = [];
+    updateMap(activeDay);
+    renderDayFilter();
+  }
+}
+function discardEditor() {
+  if (JSON.stringify(draft) !== JSON.stringify(itinerary) && !confirm('放棄此次修改？')) return;
+  document.getElementById('editorModal').classList.remove('open');
+}
+function addDay() {
+  pushHistory();
+  draft.push({
+    id: 'd' + Date.now(),
+    day: `Day ${draft.length + 1}`,
+    date: '',
+    region: '',
+    icon: '📍',
+    activities: [{ id: 'a' + Date.now(), icon: '📌', name: '新活動', sub: '' }]
+  });
+  renderEditor();
+  setTimeout(() => { document.querySelector('.editor-box').scrollTop = 9999; }, 50);
+}
+function deleteDay(di) {
+  if (draft.length <= 1) { alert('至少保留一天'); return; }
+  if (!confirm(`確定刪除「${draft[di].day}」？`)) return;
+  pushHistory();
+  draft.splice(di, 1);
+  renderEditor();
+}
+function addActivity(di) {
+  pushHistory();
+  draft[di].activities.push({ id: 'a' + Date.now(), icon: '📌', name: '新活動', sub: '' });
+  renderEditor();
+}
+function deleteActivity(di, ai) {
+  pushHistory();
+  draft[di].activities.splice(ai, 1);
+  renderEditor();
+}
+function moveUpActivity(di, ai) {
+  if (ai === 0) return;
+  pushHistory();
+  const arr = draft[di].activities;
+  [arr[ai - 1], arr[ai]] = [arr[ai], arr[ai - 1]];
+  renderEditor();
+}
+
+// ── 渲染編輯器內容 ──
+function renderEditor() {
+  const body = document.getElementById('editor-body');
+  body.innerHTML = '';
+  updateUndoBtn();
+
+  draft.forEach((day, di) => {
+    const card = document.createElement('div');
+    card.className = 'day-card';
+
+    // 一天的標題列：[icon] [day] [date] [region] [delete]
+    const fields = document.createElement('div');
+    fields.className = 'day-fields';
+
+    // emoji 用 contentEditable 而不是 input，可以正常輸入表情符號
+    const iconDiv = document.createElement('div');
+    iconDiv.className = 'emoji-inp';
+    iconDiv.contentEditable = true;
+    iconDiv.setAttribute('spellcheck', 'false');
+    iconDiv.textContent = day.icon;
+    iconDiv.addEventListener('blur', () => {
+      const v = iconDiv.textContent.trim() || '📍';
+      iconDiv.textContent = v;
+      draft[di].icon = v;
+    });
+    iconDiv.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); iconDiv.blur(); } });
+    fields.appendChild(iconDiv);
+
+    [['day', day.day, 'Day 1'], ['date', day.date, '4/1 (三)'], ['region', day.region, '地區']]
+      .forEach(([f, v, ph]) => {
+        const i = document.createElement('input');
+        i.className = 'field-inp';
+        i.value = v;
+        i.placeholder = ph;
+        i.addEventListener('input', e => draft[di][f] = e.target.value);
+        fields.appendChild(i);
+      });
+
+    const dd = document.createElement('button');
+    dd.className = 'del-day-btn';
+    dd.textContent = '🗑';
+    dd.addEventListener('click', () => deleteDay(di));
+    fields.appendChild(dd);
+    card.appendChild(fields);
+
+    // 每個 activity 一列：[drag] [icon] [name] [sub] [up] [delete]
+    day.activities.forEach((a, ai) => {
+      const row = document.createElement('div');
+      row.className = 'act-row';
+      row.dataset.di = di;
+      row.dataset.ai = ai;
+
+      // 拖曳 handle（HTML5 原生 Drag & Drop，限同一天內排序）
+      const handle = document.createElement('div');
+      handle.className = 'drag-handle';
+      handle.textContent = '⠿';
+      handle.draggable = true;
+      handle.addEventListener('dragstart', e => {
+        e.dataTransfer.setData('text/plain', JSON.stringify({ di, ai }));
+        row.style.opacity = '0.4';
+      });
+      handle.addEventListener('dragend', () => row.style.opacity = '1');
+      row.addEventListener('dragover', e => { e.preventDefault(); row.style.background = '#fde8df'; });
+      row.addEventListener('dragleave', () => row.style.background = '');
+      row.addEventListener('drop', e => {
+        e.preventDefault();
+        row.style.background = '';
+        try {
+          const { di: fd, ai: fa } = JSON.parse(e.dataTransfer.getData('text/plain'));
+          if (fd === di && fa !== ai) {
+            pushHistory();
+            const m = draft[di].activities.splice(fa, 1)[0];
+            draft[di].activities.splice(parseInt(row.dataset.ai), 0, m);
+            renderEditor();
+          }
+        } catch {}
+      });
+      row.appendChild(handle);
+
+      const emoji = document.createElement('div');
+      emoji.className = 'emoji-inp';
+      emoji.contentEditable = true;
+      emoji.setAttribute('spellcheck', 'false');
+      emoji.textContent = a.icon;
+      emoji.addEventListener('blur', () => {
+        const v = emoji.textContent.trim() || '📌';
+        emoji.textContent = v;
+        draft[di].activities[ai].icon = v;
+      });
+      emoji.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); emoji.blur(); } });
+      row.appendChild(emoji);
+
+      ['name', 'sub'].forEach((f, idx) => {
+        const i = document.createElement('input');
+        i.className = 'field-inp';
+        i.value = a[f];
+        i.placeholder = f === 'name' ? '活動名稱' : '備註';
+        i.style.fontSize = idx === 1 ? '12px' : '13px';
+        i.addEventListener('input', e => draft[di].activities[ai][f] = e.target.value);
+        row.appendChild(i);
+      });
+
+      const up = document.createElement('button');
+      up.className = 'act-up-btn';
+      up.textContent = '↑';
+      up.disabled = ai === 0;
+      up.addEventListener('click', () => moveUpActivity(di, ai));
+      row.appendChild(up);
+
+      const del = document.createElement('button');
+      del.className = 'act-del-btn';
+      del.textContent = '✕';
+      del.addEventListener('click', () => deleteActivity(di, ai));
+      row.appendChild(del);
+
+      card.appendChild(row);
+    });
+
+    const addBtn = document.createElement('button');
+    addBtn.className = 'add-activity-btn';
+    addBtn.textContent = '＋ 新增活動';
+    addBtn.addEventListener('click', () => addActivity(di));
+    card.appendChild(addBtn);
+
+    body.appendChild(card);
+  });
+}
+
+// 點擊 Modal 外圍 → 關閉
+document.getElementById('editorModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('editorModal')) discardEditor();
+});
+
+// ── 初始化 ──
+renderWeather();    // 先用 fallback 立即渲染
+fetchWeather();     // 再非同步抓即時資料
+renderTimeline();
+</script>
+</body>
+</html>
