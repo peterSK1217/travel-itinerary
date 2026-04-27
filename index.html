@@ -23,10 +23,8 @@
 <meta name="robots" content="noindex, nofollow">
 <title>✈ Travel Note · 我的旅程</title>
 
-<!-- 字體：Noto Serif TC（內文）+ Klee One（手寫風標題） -->
 <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+TC:wght@300;400;600;700&family=Klee+One:wght@400;600&display=swap" rel="stylesheet">
 
-<!-- Leaflet 地圖套件（CSS 必須在 JS 之前） -->
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 
@@ -148,7 +146,7 @@ main{max-width:900px;margin:0 auto;padding:20px 14px 60px}
 .btn-save{background:var(--orange);color:#fff;border:none;border-radius:8px;padding:6px 16px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit}
 .hint{font-size:11px;color:var(--ash);margin-bottom:14px}
 .day-card{background:var(--surface);border:1.5px solid var(--border);border-radius:14px;padding:14px;margin-bottom:10px}
-.day-fields{display:grid;grid-template-columns:44px 60px 96px 1fr 32px;gap:6px;align-items:center;margin-bottom:10px}
+.day-fields{display:grid;grid-template-columns:44px 70px 105px 1fr 32px;gap:6px;align-items:center;margin-bottom:10px}
 .field-inp{width:100%;padding:6px 7px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;background:var(--white);outline:none;font-family:inherit;transition:border-color .15s}
 .field-inp:focus{border-color:var(--orange)}
 .emoji-inp{width:34px;min-height:32px;border:1.5px solid var(--border);border-radius:8px;font-size:16px;text-align:center;background:var(--surface);outline:none;cursor:text;display:flex;align-items:center;justify-content:center;transition:border-color .15s}
@@ -170,7 +168,6 @@ main{max-width:900px;margin:0 auto;padding:20px 14px 60px}
 <header>
   <div class="logo">✈ Travel Note <span id="header-subtitle">2026 · 京都櫻花</span></div>
   <div class="header-btns">
-    <!-- 編輯按鈕：開啟編輯器 Modal。不需要編輯功能可直接刪掉這顆按鈕 -->
     <button class="btn-edit" onclick="openEditor()">✏️ 編輯</button>
   </div>
 </header>
@@ -180,7 +177,6 @@ main{max-width:900px;margin:0 auto;padding:20px 14px 60px}
   <button class="tab" onclick="switchTab('map',this)">🗺 地圖</button>
 </div>
 
-<!-- 行程頁 -->
 <div id="page-timeline" class="page active">
   <main>
     <div class="weather-bar" id="weather-bar"></div>
@@ -191,7 +187,6 @@ main{max-width:900px;margin:0 auto;padding:20px 14px 60px}
   </main>
 </div>
 
-<!-- 地圖頁 -->
 <div id="page-map" class="page">
   <main>
     <div class="day-filter" id="day-filter"></div>
@@ -200,7 +195,6 @@ main{max-width:900px;margin:0 auto;padding:20px 14px 60px}
   </main>
 </div>
 
-<!-- 編輯器 Modal -->
 <div class="modal-overlay" id="editorModal">
   <div class="editor-box">
     <div class="editor-header">
@@ -211,7 +205,7 @@ main{max-width:900px;margin:0 auto;padding:20px 14px 60px}
         <button class="btn-save" onclick="saveEditor()">✓ 儲存</button>
       </div>
     </div>
-    <p class="hint">⠿ 可拖曳排序，↑ 可上移，修改後按「儲存」才會生效</p>
+    <p class="hint">⠿ 可拖曳排序，修改後按「儲存」才會生效。日期請點擊選單選擇。</p>
     <div id="editor-body"></div>
     <button class="add-day-btn" onclick="addDay()">＋ 新增一天</button>
   </div>
@@ -220,52 +214,37 @@ main{max-width:900px;margin:0 auto;padding:20px 14px 60px}
 <script>
 // ╔═══════════════════════════════════════════════════════════════════════════╗
 // ║                                                                           ║
-// ║   ⚙ CONFIG 設定區  ←── 主要修改這裡                                       ║
+// ║   ⚙ CONFIG 設定區                                                       ║
 // ║                                                                           ║
 // ╚═══════════════════════════════════════════════════════════════════════════╝
 
 const CONFIG = {
-  // 頁面標題（瀏覽器分頁顯示）
   pageTitle: '✈ Travel Note · 京都櫻花',
-
-  // 頁首副標題（出現在 logo 後面）
   headerSubtitle: '2026 · 京都櫻花',
-
-  // localStorage 用的 key，每個專案請取不同名稱避免互相覆蓋
   storageKey: 'tn_kyoto_2026',
 
-  // 旅程日期範圍（用於天氣 API 查詢，格式必須是 YYYY-MM-DD）
-  // ⚠ Open-Meteo 只能查詢「過去」與「未來 16 天」，太早或太遠的日期會失敗（會自動 fallback）
-  weatherStartDate: '2026-04-01',
-  weatherEndDate:   '2026-04-03',
+  // 預設日期（若行程表全空時的 fallback，使用 YYYY-MM-DD 格式）
+  weatherStartDate: '2026-05-01',
+  weatherEndDate:   '2026-05-03',
 
-  // 旅程目的地的中心座標（用於天氣 API；地圖會自動依景點縮放，不受此影響）
   weatherLatitude:  35.0116,    // 京都
   weatherLongitude: 135.7681,
 
-  // 每日色彩主題（地圖 marker 顏色、chip 顏色）
-  // 有幾天行程就準備幾個顏色；不夠會自動循環使用
   dayColors: ['#E8642A', '#5a8a5a', '#2a6a9a', '#c8860a', '#7b5ea7'],
 
-  // 天氣 fallback（API 失敗時顯示這份；通常用歷史平均值）
-  // date 格式建議「M/D」、day 格式建議「Day N」
   weatherFallback: [
-    {date:'4/1', day:'Day 1', icon:'🌸', high:18, low:9,  desc:'晴', rain:'降雨機率 20%'},
-    {date:'4/2', day:'Day 2', icon:'⛅', high:17, low:10, desc:'多雲', rain:'降雨機率 30%'},
-    {date:'4/3', day:'Day 3', icon:'🌦', high:16, low:9,  desc:'多雲偶雨', rain:'降雨機率 50%'},
+    {date:'5/1', day:'Day 1', icon:'🌸', high:18, low:9,  desc:'晴', rain:'降雨機率 20%'},
+    {date:'5/2', day:'Day 2', icon:'⛅', high:17, low:10, desc:'多雲', rain:'降雨機率 30%'},
+    {date:'5/3', day:'Day 3', icon:'🌦', high:16, low:9,  desc:'多雲偶雨', rain:'降雨機率 50%'},
   ],
 };
 
 // ╔═══════════════════════════════════════════════════════════════════════════╗
 // ║                                                                           ║
-// ║   📋 預設行程資料  ←── 主要修改這裡                                       ║
+// ║   📋 預設行程資料                                                       ║
 // ║                                                                           ║
 // ╚═══════════════════════════════════════════════════════════════════════════╝
 
-// ── SPOTS：景點座標表 ──
-// key 必須跟下面 DEFAULT_ITINERARY 裡 activity 的 name 完全一致（地圖才會出現該標記）
-// lat/lng 取得方式：Google Maps 在景點上「右鍵 → 第一行就是經緯度，點一下會複製」
-// hint 是地圖 popup 的補充說明，可省略
 const SPOTS = {
   '清水寺':       { lat: 34.9949, lng: 135.7851, hint: '京都最古老寺院之一' },
   '伏見稻荷大社': { lat: 34.9671, lng: 135.7727, hint: '千本鳥居' },
@@ -276,28 +255,22 @@ const SPOTS = {
   '錦市場':       { lat: 35.0050, lng: 135.7651, hint: '京都廚房' },
 };
 
-// ── DEFAULT_ITINERARY：預設行程 ──
-// 結構：[ {一天}, {一天}, ... ]
-// 每天：{ id, day, date, region, icon, activities: [...] }
-// 每個 activity：{ id, icon, name, sub, url?, urlLabel?, urls?: [{href,label},...] }
-//
-// id 隨意，但必須在這個陣列內 unique。可用 'd1' 'd2' 'a1' 'a2' 這種短碼。
-// name 如果剛好等於 SPOTS 裡的 key，地圖頁就會顯示對應標記。
+// 日期格式已全面改為 YYYY-MM-DD
 const DEFAULT_ITINERARY = [
-  { id:'d1', day:'Day 1', date:'4/1 (三)', region:'京都市區', icon:'🌸', activities:[
+  { id:'d1', day:'Day 1', date:'2026-05-01', region:'京都市區', icon:'🌸', activities:[
     { id:'a1', icon:'✈️', name:'抵達關西機場',   sub:'CI 156｜桃園 → 關西 09:30' },
     { id:'a2', icon:'🚄', name:'HARUKA 特急到京都', sub:'約 75 分鐘' },
     { id:'a3', icon:'⛩',  name:'清水寺', sub:'下午散步、和服體驗',
       url:'https://www.kiyomizudera.or.jp/', urlLabel:'🌐 官網' },
     { id:'a4', icon:'🍜', name:'晚餐：先斗町', sub:'京都老街、河岸景觀' },
   ]},
-  { id:'d2', day:'Day 2', date:'4/2 (四)', region:'伏見・嵐山', icon:'🦊', activities:[
+  { id:'d2', day:'Day 2', date:'2026-05-02', region:'伏見・嵐山', icon:'🦊', activities:[
     { id:'b1', icon:'⛩',  name:'伏見稻荷大社', sub:'07:00 抵達避開人潮' },
     { id:'b2', icon:'🎋', name:'嵐山竹林', sub:'徒步穿越竹林小徑' },
     { id:'b3', icon:'🌉', name:'渡月橋', sub:'嵐山標誌風景' },
     { id:'b4', icon:'☕', name:'%Arabica 嵐山', sub:'外帶咖啡看河景' },
   ]},
-  { id:'d3', day:'Day 3', date:'4/3 (五)', region:'金閣・市區', icon:'✨', activities:[
+  { id:'d3', day:'Day 3', date:'2026-05-03', region:'金閣・市區', icon:'✨', activities:[
     { id:'c1', icon:'🏯', name:'金閣寺', sub:'清晨光線最美' },
     { id:'c2', icon:'🛍', name:'錦市場', sub:'伴手禮、街邊小吃' },
     { id:'c3', icon:'✈️', name:'返程關西機場', sub:'CI 157｜關西 18:00 → 桃園' },
@@ -306,20 +279,14 @@ const DEFAULT_ITINERARY = [
 
 // ╔═══════════════════════════════════════════════════════════════════════════╗
 // ║                                                                           ║
-// ║   ⬇ 以下程式邏輯區，不需要修改                                            ║
+// ║   ⬇ 程式邏輯區                                                          ║
 // ║                                                                           ║
 // ╚═══════════════════════════════════════════════════════════════════════════╝
 
-// ── 套用 CONFIG 到 DOM ──
 document.title = CONFIG.pageTitle;
 document.getElementById('header-subtitle').textContent = CONFIG.headerSubtitle;
+document.getElementById('weather-bar').style.gridTemplateColumns = `repeat(${CONFIG.weatherFallback.length}, 1fr)`;
 
-// 動態設定 weather-bar 的欄位數（依 fallback 天數）
-document.getElementById('weather-bar').style.gridTemplateColumns =
-  `repeat(${CONFIG.weatherFallback.length}, 1fr)`;
-
-// ── 天氣 API：WMO weather code 對應表 ──
-// 參考：https://open-meteo.com/en/docs（WMO Weather interpretation codes）
 const WMO_MAP = {
   0:['☀️','晴'], 1:['🌤','晴時多雲'], 2:['⛅','多雲'], 3:['☁️','陰'],
   45:['🌫','霧'], 48:['🌫','霧'],
@@ -332,14 +299,31 @@ const WMO_MAP = {
 
 let WEATHER = CONFIG.weatherFallback;
 
-// 從 Open-Meteo 抓即時天氣；失敗就靜默使用 fallback
+// 將 YYYY-MM-DD 轉為 5/1 (五) 的 Helper Function
+function formatDateLabel(isoDate) {
+  if (!isoDate || !isoDate.match(/^\d{4}-\d{2}-\d{2}$/)) return isoDate;
+  const dt = new Date(isoDate);
+  const w = ['日','一','二','三','四','五','六'][dt.getDay()];
+  return `${dt.getMonth()+1}/${dt.getDate()} (${w})`;
+}
+
 async function fetchWeather() {
   try {
+    // 自動從行程表抓取 YYYY-MM-DD
+    let startDate = CONFIG.weatherStartDate;
+    let endDate = CONFIG.weatherEndDate;
+    if (itinerary.length > 0) {
+      if (itinerary[0].date.match(/^\d{4}-\d{2}-\d{2}$/)) startDate = itinerary[0].date;
+      const lastDate = itinerary[itinerary.length - 1].date;
+      if (lastDate.match(/^\d{4}-\d{2}-\d{2}$/)) endDate = lastDate;
+    }
+
     const url = 'https://api.open-meteo.com/v1/forecast'
       + `?latitude=${CONFIG.weatherLatitude}&longitude=${CONFIG.weatherLongitude}`
       + '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code'
       + '&timezone=auto'
-      + `&start_date=${CONFIG.weatherStartDate}&end_date=${CONFIG.weatherEndDate}`;
+      + `&start_date=${startDate}&end_date=${endDate}`;
+    
     const res = await fetch(url);
     if (!res.ok) throw new Error('HTTP ' + res.status);
     const data = await res.json();
@@ -359,7 +343,7 @@ async function fetchWeather() {
         low:  Math.round(d.temperature_2m_min[i]),
         desc,
         rain: rain != null ? `降雨機率 ${rain}%` : '—',
-        live: true,    // 標記為即時資料
+        live: true,
       };
     });
     renderWeather();
@@ -368,7 +352,6 @@ async function fetchWeather() {
   }
 }
 
-// ── localStorage 存取 ──
 function loadItinerary() {
   try {
     const s = localStorage.getItem(CONFIG.storageKey);
@@ -379,22 +362,19 @@ function saveItinerary(d) {
   try { localStorage.setItem(CONFIG.storageKey, JSON.stringify(d)); } catch {}
 }
 
-// ── 全域狀態 ──
-let itinerary = loadItinerary();   // 目前的行程資料
-let draft = null;                  // 編輯器內的暫存（深拷貝）
-let history = [];                  // Undo 歷史堆疊（最多 30 筆）
-let map = null;                    // Leaflet 地圖物件
-let markers = [];                  // 地圖上的所有 marker
-let activeDay = 'all';             // 地圖頁目前篩選的天數（'all' 或 0,1,2...）
+let itinerary = loadItinerary();
+let draft = null;
+let history = [];
+let map = null;
+let markers = [];
+let activeDay = 'all';
 
-// ── 分頁切換 ──
 function switchTab(tab, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
   document.getElementById('page-' + tab).classList.add('active');
   if (tab === 'map') {
-    // 地圖容器尺寸在隱藏狀態下不正確，切過去後要重新計算
     setTimeout(() => {
       if (!map) initMap();
       else { map.invalidateSize(); updateMap(activeDay); }
@@ -402,7 +382,6 @@ function switchTab(tab, el) {
   }
 }
 
-// ── 渲染天氣列 ──
 function renderWeather() {
   const bar = document.getElementById('weather-bar');
   bar.innerHTML = WEATHER.map(w => `
@@ -419,7 +398,6 @@ function renderWeather() {
   `).join('');
 }
 
-// ── 渲染時間軸 ──
 function renderTimeline() {
   const body = document.getElementById('timeline-body');
   body.innerHTML = '';
@@ -428,15 +406,12 @@ function renderTimeline() {
     block.className = 'day-block';
     const acts = day.activities.map(a => {
       const spot = SPOTS[a.name];
-      // 主連結（單一 URL）
       const mainLink = a.url
         ? `<div class="map-badge"><a href="${a.url}" target="_blank" onclick="event.stopPropagation()" style="color:var(--orange);text-decoration:none;">${a.urlLabel || '🔗 連結'}</a></div>`
         : '';
-      // 多連結（陣列）
       const multiLinks = (a.urls || []).map(u =>
         `<div class="map-badge"><a href="${u.href}" target="_blank" onclick="event.stopPropagation()" style="color:var(--orange);text-decoration:none;">${u.label}</a></div>`
       ).join('');
-      // 點擊整個 activity → 跳到地圖頁該景點（只有有座標的才能點）
       const clickHandler = spot
         ? `onclick="jumpToSpot(${spot.lat},${spot.lng},'${a.name.replace(/'/g, "\\'")}')"`
         : '';
@@ -452,7 +427,7 @@ function renderTimeline() {
     }).join('');
     block.innerHTML = `
       <div class="day-dot"></div>
-      <div class="day-header">${day.day} ${day.date}</div>
+      <div class="day-header">${day.day} ${formatDateLabel(day.date)}</div>
       <div class="day-region">${day.icon} ${day.region}</div>
       <div class="activities">${acts}</div>
     `;
@@ -460,9 +435,8 @@ function renderTimeline() {
   });
 }
 
-// ── 從時間軸跳到地圖上的某個景點 ──
 function jumpToSpot(lat, lng, name) {
-  document.querySelectorAll('.tab')[1].click();   // 切到地圖頁
+  document.querySelectorAll('.tab')[1].click();
   setTimeout(() => {
     if (map) {
       map.setView([lat, lng], 14, { animate: true });
@@ -471,15 +445,6 @@ function jumpToSpot(lat, lng, name) {
   }, 200);
 }
 
-// ── 地圖：依今天日期決定預設顯示哪一天 ──
-function getDefaultDay() {
-  // 如果是旅程期間中，自動跳到「今天」那一天的標記
-  // 旅程開始前或結束後，預設顯示全部
-  // 簡化版本：直接顯示全部
-  return 'all';
-}
-
-// ── 初始化地圖 ──
 function initMap() {
   map = L.map('map', { zoomControl: true }).setView(
     [CONFIG.weatherLatitude, CONFIG.weatherLongitude], 9
@@ -488,27 +453,25 @@ function initMap() {
     attribution: '© OpenStreetMap contributors',
     maxZoom: 18
   }).addTo(map);
-  activeDay = getDefaultDay();
+  activeDay = 'all';
   renderDayFilter();
   updateMap(activeDay);
 }
 
-// ── 渲染日期篩選 chips ──
 function renderDayFilter() {
   const fil = document.getElementById('day-filter');
   fil.innerHTML = '';
-  // 「全部」
   const allBtn = document.createElement('button');
   allBtn.className = 'day-chip' + (activeDay === 'all' ? ' active' : '');
   allBtn.textContent = '全部';
   allBtn.onclick = () => { activeDay = 'all'; renderDayFilter(); updateMap('all'); };
   fil.appendChild(allBtn);
-  // 每一天
+  
   itinerary.forEach((day, di) => {
     const color = CONFIG.dayColors[di % CONFIG.dayColors.length];
     const btn = document.createElement('button');
     btn.className = 'day-chip' + (activeDay === di ? ' active' : '');
-    btn.textContent = `${day.day} ${day.date}`;
+    btn.textContent = `${day.day} ${formatDateLabel(day.date)}`;
     if (activeDay === di) {
       btn.style.borderColor = color;
       btn.style.background = color;
@@ -519,12 +482,10 @@ function renderDayFilter() {
   });
 }
 
-// ── 更新地圖標記（依目前篩選） ──
 function updateMap(filter) {
   if (!map) return;
   markers.forEach(m => map.removeLayer(m));
   markers = [];
-
   const days = filter === 'all' ? itinerary : [itinerary[filter]];
   const bounds = [];
 
@@ -535,47 +496,32 @@ function updateMap(filter) {
       const spot = SPOTS[a.name];
       if (!spot) return;
       bounds.push([spot.lat, spot.lng]);
-
-      // 自訂彩色圓形 marker
       const icon = L.divIcon({
-        html: `<div style="
-          background:${color};color:#fff;border:2px solid #fff;
-          width:32px;height:32px;border-radius:50%;
-          display:flex;align-items:center;justify-content:center;
-          font-size:15px;box-shadow:0 2px 6px rgba(0,0,0,.3);
-          cursor:pointer;
-        ">${a.icon}</div>`,
+        html: `<div style="background:${color};color:#fff;border:2px solid #fff;width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:15px;box-shadow:0 2px 6px rgba(0,0,0,.3);cursor:pointer;">${a.icon}</div>`,
         className: '',
         iconSize: [32, 32],
         iconAnchor: [16, 16],
         popupAnchor: [0, -18],
       });
-
       const popup = `<div>
         <div class="popup-icon">${a.icon}</div>
         <div class="popup-name">${a.name}</div>
         ${a.sub ? `<div class="popup-sub">${a.sub}</div>` : ''}
         ${spot.hint ? `<div class="popup-sub">📍 ${spot.hint}</div>` : ''}
-        <div class="popup-day" style="background:${color}">${day.day} ${day.date} · ${day.region}</div>
+        <div class="popup-day" style="background:${color}">${day.day} ${formatDateLabel(day.date)} · ${day.region}</div>
       </div>`;
-
-      const marker = L.marker([spot.lat, spot.lng], { icon, title: a.name })
-        .bindPopup(popup)
-        .addTo(map);
+      const marker = L.marker([spot.lat, spot.lng], { icon, title: a.name }).bindPopup(popup).addTo(map);
       markers.push(marker);
     });
   });
 
-  // 自動縮放到所有標記的範圍
   if (bounds.length > 0) {
     if (bounds.length === 1) map.setView(bounds[0], 13);
     else map.fitBounds(bounds, { padding: [40, 40] });
   }
-
   renderSpotList(filter);
 }
 
-// ── 渲染地圖下方的景點清單（單日才顯示） ──
 function renderSpotList(filter) {
   const list = document.getElementById('spot-list');
   list.innerHTML = '';
@@ -585,7 +531,7 @@ function renderSpotList(filter) {
   const color = CONFIG.dayColors[filter % CONFIG.dayColors.length];
   const header = document.createElement('div');
   header.style.cssText = `font-family:'Klee One',cursive;font-size:15px;font-weight:700;color:${color};margin-bottom:6px`;
-  header.textContent = `${day.icon} ${day.day} ${day.date} · ${day.region}`;
+  header.textContent = `${day.icon} ${day.day} ${formatDateLabel(day.date)} · ${day.region}`;
   list.appendChild(header);
   day.activities.forEach(a => {
     const spot = SPOTS[a.name];
@@ -608,9 +554,8 @@ function renderSpotList(filter) {
   });
 }
 
-// ── 編輯器 ──
 function openEditor() {
-  draft = JSON.parse(JSON.stringify(itinerary));   // 深拷貝
+  draft = JSON.parse(JSON.stringify(itinerary));
   history = [];
   renderEditor();
   document.getElementById('editorModal').classList.add('open');
@@ -634,6 +579,7 @@ function saveEditor() {
   saveItinerary(itinerary);
   document.getElementById('editorModal').classList.remove('open');
   renderTimeline();
+  fetchWeather(); // 儲存後立即重新抓取天氣
   if (map) {
     markers.forEach(m => map.removeLayer(m));
     markers = [];
@@ -647,10 +593,12 @@ function discardEditor() {
 }
 function addDay() {
   pushHistory();
+  const dObj = new Date();
+  const iso = `${dObj.getFullYear()}-${String(dObj.getMonth()+1).padStart(2,'0')}-${String(dObj.getDate()).padStart(2,'0')}`;
   draft.push({
     id: 'd' + Date.now(),
     day: `Day ${draft.length + 1}`,
-    date: '',
+    date: iso,
     region: '',
     icon: '📍',
     activities: [{ id: 'a' + Date.now(), icon: '📌', name: '新活動', sub: '' }]
@@ -683,7 +631,6 @@ function moveUpActivity(di, ai) {
   renderEditor();
 }
 
-// ── 渲染編輯器內容 ──
 function renderEditor() {
   const body = document.getElementById('editor-body');
   body.innerHTML = '';
@@ -693,11 +640,9 @@ function renderEditor() {
     const card = document.createElement('div');
     card.className = 'day-card';
 
-    // 一天的標題列：[icon] [day] [date] [region] [delete]
     const fields = document.createElement('div');
     fields.className = 'day-fields';
 
-    // emoji 用 contentEditable 而不是 input，可以正常輸入表情符號
     const iconDiv = document.createElement('div');
     iconDiv.className = 'emoji-inp';
     iconDiv.contentEditable = true;
@@ -711,9 +656,11 @@ function renderEditor() {
     iconDiv.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); iconDiv.blur(); } });
     fields.appendChild(iconDiv);
 
-    [['day', day.day, 'Day 1'], ['date', day.date, '4/1 (三)'], ['region', day.region, '地區']]
-      .forEach(([f, v, ph]) => {
+    // 修改此處：支援 date input 屬性
+    [['day', day.day, 'Day 1', 'text'], ['date', day.date, '', 'date'], ['region', day.region, '地區', 'text']]
+      .forEach(([f, v, ph, type]) => {
         const i = document.createElement('input');
+        i.type = type;
         i.className = 'field-inp';
         i.value = v;
         i.placeholder = ph;
@@ -728,14 +675,12 @@ function renderEditor() {
     fields.appendChild(dd);
     card.appendChild(fields);
 
-    // 每個 activity 一列：[drag] [icon] [name] [sub] [up] [delete]
     day.activities.forEach((a, ai) => {
       const row = document.createElement('div');
       row.className = 'act-row';
       row.dataset.di = di;
       row.dataset.ai = ai;
 
-      // 拖曳 handle（HTML5 原生 Drag & Drop，限同一天內排序）
       const handle = document.createElement('div');
       handle.className = 'drag-handle';
       handle.textContent = '⠿';
@@ -811,14 +756,12 @@ function renderEditor() {
   });
 }
 
-// 點擊 Modal 外圍 → 關閉
 document.getElementById('editorModal').addEventListener('click', e => {
   if (e.target === document.getElementById('editorModal')) discardEditor();
 });
 
-// ── 初始化 ──
-renderWeather();    // 先用 fallback 立即渲染
-fetchWeather();     // 再非同步抓即時資料
+renderWeather();
+fetchWeather();
 renderTimeline();
 </script>
 </body>
