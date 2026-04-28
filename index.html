@@ -264,14 +264,34 @@ async function fetchWeather() {
   try {
     let startDate = CONFIG.weatherStartDate;
     let endDate = CONFIG.weatherEndDate;
+    let queryLat = CONFIG.weatherLatitude;    // 預設緯度
+    let queryLng = CONFIG.weatherLongitude;   // 預設經度
+
     if (itinerary.length > 0) {
+      // 1. 自動抓取起訖日期
       if (itinerary[0].date.match(/^\d{4}-\d{2}-\d{2}$/)) startDate = itinerary[0].date;
       const lastDate = itinerary[itinerary.length - 1].date;
       if (lastDate.match(/^\d{4}-\d{2}-\d{2}$/)) endDate = lastDate;
+
+      // 2. 自動掃描錨點：找出行程表中「第一個」有經緯度的景點作為天氣基準
+      let foundCoord = false;
+      for (const day of itinerary) {
+        for (const act of day.activities) {
+          const spot = getSpot(act); // 呼叫現成的 helper 驗證座標
+          if (spot && !foundCoord) {
+            queryLat = spot.lat;
+            queryLng = spot.lng;
+            foundCoord = true;
+            break; // 找到第一個就跳出內圈
+          }
+        }
+        if (foundCoord) break; // 跳出外圈
+      }
     }
 
+    // 3. 將動態抓取到的經緯度與日期丟給天氣 API
     const url = 'https://api.open-meteo.com/v1/forecast'
-      + `?latitude=${CONFIG.weatherLatitude}&longitude=${CONFIG.weatherLongitude}`
+      + `?latitude=${queryLat}&longitude=${queryLng}`
       + '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code'
       + '&timezone=auto'
       + `&start_date=${startDate}&end_date=${endDate}`;
