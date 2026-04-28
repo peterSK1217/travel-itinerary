@@ -297,6 +297,7 @@ async function fetchWeather() {
       + `?latitude=${queryLat}&longitude=${queryLng}`
       + '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code'
       + '&timezone=auto'
+      + '&models=best_match'  // 👈 新增這一行，讓 API 自動幫你選當地最準的模型
       + `&start_date=${startDate}&end_date=${endDate}`;
     
     const res = await fetch(url);
