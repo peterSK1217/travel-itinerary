@@ -264,32 +264,35 @@ async function fetchWeather() {
   try {
     let startDate = CONFIG.weatherStartDate;
     let endDate = CONFIG.weatherEndDate;
-    let queryLat = CONFIG.weatherLatitude;    // 預設緯度
-    let queryLng = CONFIG.weatherLongitude;   // 預設經度
+    let queryLat = CONFIG.weatherLatitude;
+    let queryLng = CONFIG.weatherLongitude;
 
     if (itinerary.length > 0) {
-      // 1. 自動抓取起訖日期
       if (itinerary[0].date.match(/^\d{4}-\d{2}-\d{2}$/)) startDate = itinerary[0].date;
       const lastDate = itinerary[itinerary.length - 1].date;
       if (lastDate.match(/^\d{4}-\d{2}-\d{2}$/)) endDate = lastDate;
 
-      // 2. 自動掃描錨點：找出行程表中「第一個」有經緯度的景點作為天氣基準
+      // 自動掃描錨點
       let foundCoord = false;
       for (const day of itinerary) {
         for (const act of day.activities) {
-          const spot = getSpot(act); // 呼叫現成的 helper 驗證座標
+          const spot = getSpot(act); 
           if (spot && !foundCoord) {
             queryLat = spot.lat;
             queryLng = spot.lng;
             foundCoord = true;
-            break; // 找到第一個就跳出內圈
+            break; 
           }
         }
-        if (foundCoord) break; // 跳出外圈
+        if (foundCoord) break; 
       }
     }
 
-    // 3. 將動態抓取到的經緯度與日期丟給天氣 API
+    // 觀測性注入：列印準備送出的真實資料
+    console.log(`[Codex Debug] 🚀 準備發送天氣 API...`);
+    console.log(`[Codex Debug] 📍 鎖定座標: Lat ${queryLat}, Lng ${queryLng}`);
+    console.log(`[Codex Debug] 📅 查詢區間: ${startDate} 至 ${endDate}`);
+
     const url = 'https://api.open-meteo.com/v1/forecast'
       + `?latitude=${queryLat}&longitude=${queryLng}`
       + '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code'
@@ -297,11 +300,22 @@ async function fetchWeather() {
       + `&start_date=${startDate}&end_date=${endDate}`;
     
     const res = await fetch(url);
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    
+    // 強化錯誤攔截：精準判斷是否超出 16 天限制
+    if (!res.ok) {
+      const errText = await res.text();
+      console.error(`[Codex Debug] ❌ API 拒絕請求！狀態碼: ${res.status}`);
+      console.error(`[Codex Debug] ❌ 錯誤詳情: ${errText}`);
+      throw new Error(`HTTP ${res.status}: ${errText}`);
+    }
+
     const data = await res.json();
+    console.log(`[Codex Debug] ✅ API 回傳成功！`, data.daily);
+
     const d = data.daily;
     if (!d || !d.time) throw new Error('No daily data');
     const codes = d.weather_code || d.weathercode || [];
+    
     WEATHER = d.time.map((dateStr, i) => {
       const code = codes[i];
       const [icon, desc] = WMO_MAP[code] ?? ['🌡','—'];
@@ -319,8 +333,10 @@ async function fetchWeather() {
       };
     });
     renderWeather();
+    
   } catch(e) {
-    console.warn('天氣 API 失敗，使用歷史平均', e);
+    // 當發生異常（如日期超過 16 天），啟用 Fallback 並標示原因
+    console.warn('[Codex Debug] ⚠️ 天氣 API 執行失敗，已自動切換至歷史平均 Fallback。', e);
   }
 }
 
