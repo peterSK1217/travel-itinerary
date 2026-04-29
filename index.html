@@ -188,6 +188,8 @@ const CONFIG = {
   weatherEndDate:   '2026-05-03',
   weatherLatitude:  35.0116,
   weatherLongitude: 135.7681,
+  // 天氣模型：jma_seamless(日本) / icon_seamless(歐洲) / gfs_seamless(美洲) / best_match(全球混合)
+  weatherModel: 'jma_seamless',
 
   dayColors: ['#E8642A', '#5a8a5a', '#2a6a9a', '#c8860a', '#7b5ea7'],
 
@@ -231,7 +233,6 @@ const DEFAULT_ITINERARY = [
 
 document.title = CONFIG.pageTitle;
 document.getElementById('header-subtitle').textContent = CONFIG.headerSubtitle;
-document.getElementById('weather-bar').style.gridTemplateColumns = `repeat(${CONFIG.weatherFallback.length}, 1fr)`;
 
 const WMO_MAP = {
   0:['☀️','晴'], 1:['🌤','晴時多雲'], 2:['⛅','多雲'], 3:['☁️','陰'],
@@ -262,82 +263,84 @@ function getSpot(a) {
 
 async function fetchWeather() {
   try {
-    let startDate = CONFIG.weatherStartDate;
-    let endDate = CONFIG.weatherEndDate;
-    let queryLat = CONFIG.weatherLatitude;
-    let queryLng = CONFIG.weatherLongitude;
+    if (!itinerary.length) return;
 
-    if (itinerary.length > 0) {
-      if (itinerary[0].date.match(/^\d{4}-\d{2}-\d{2}$/)) startDate = itinerary[0].date;
-      const lastDate = itinerary[itinerary.length - 1].date;
-      if (lastDate.match(/^\d{4}-\d{2}-\d{2}$/)) endDate = lastDate;
-
-      // 自動掃描錨點
-      let foundCoord = false;
-      for (const day of itinerary) {
-        for (const act of day.activities) {
-          const spot = getSpot(act); 
-          if (spot && !foundCoord) {
-            queryLat = spot.lat;
-            queryLng = spot.lng;
-            foundCoord = true;
-            break; 
-          }
-        }
-        if (foundCoord) break; 
+    // Step 1: 為每一天挑代表座標（取該日第一個有座標的活動）
+    const rawCoords = itinerary.map(day => {
+      for (const act of day.activities) {
+        const spot = getSpot(act);
+        if (spot) return { lat: spot.lat, lng: spot.lng };
       }
+      return null;
+    });
+
+    // Step 2: 缺座標的日子用前後相鄰日補上，最後再回退到全域預設
+    let prev = null;
+    const fwd = rawCoords.map(c => { if (c) prev = c; return c || prev; });
+    const filled = [...fwd];
+    let next = null;
+    for (let i = filled.length - 1; i >= 0; i--) {
+      if (filled[i]) next = filled[i];
+      else filled[i] = next;
     }
+    const coords = filled.map(c => c || { lat: CONFIG.weatherLatitude, lng: CONFIG.weatherLongitude });
 
-    // 觀測性注入：列印準備送出的真實資料
-    console.log(`[Codex Debug] 🚀 準備發送天氣 API...`);
-    console.log(`[Codex Debug] 📍 鎖定座標: Lat ${queryLat}, Lng ${queryLng}`);
-    console.log(`[Codex Debug] 📅 查詢區間: ${startDate} 至 ${endDate}`);
+    // Step 3: 為每一天平行打 API（用該日座標 + 該日日期）
+    console.log(`[Weather] 🚀 並行查詢 ${itinerary.length} 天，模型: ${CONFIG.weatherModel}`);
+    const requests = itinerary.map((day, i) => {
+      const coord = coords[i];
+      if (!day.date.match(/^\d{4}-\d{2}-\d{2}$/)) {
+        return Promise.resolve({ ok: false, day, coord });
+      }
+      console.log(`[Weather] Day ${i+1} (${day.date}) → ${coord.lat}, ${coord.lng}`);
+      const url = 'https://api.open-meteo.com/v1/forecast'
+        + `?latitude=${coord.lat}&longitude=${coord.lng}`
+        + '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code'
+        + '&timezone=auto'
+        + `&models=${CONFIG.weatherModel}`
+        + `&start_date=${day.date}&end_date=${day.date}`;
+      return fetch(url)
+        .then(r => r.ok ? r.json() : Promise.reject(`HTTP ${r.status}`))
+        .then(data => ({ ok: true, day, coord, data }))
+        .catch(err => {
+          console.warn(`[Weather] Day ${i+1} 查詢失敗:`, err);
+          return { ok: false, day, coord };
+        });
+    });
 
-    const url = 'https://api.open-meteo.com/v1/forecast'
-      + `?latitude=${queryLat}&longitude=${queryLng}`
-      + '&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max,weather_code'
-      + '&timezone=auto'
-      + '&models=best_match'  // 👈 新增這一行，讓 API 自動幫你選當地最準的模型
-      + `&start_date=${startDate}&end_date=${endDate}`;
-    
-    const res = await fetch(url);
-    
-    // 強化錯誤攔截：精準判斷是否超出 16 天限制
-    if (!res.ok) {
-      const errText = await res.text();
-      console.error(`[Codex Debug] ❌ API 拒絕請求！狀態碼: ${res.status}`);
-      console.error(`[Codex Debug] ❌ 錯誤詳情: ${errText}`);
-      throw new Error(`HTTP ${res.status}: ${errText}`);
-    }
+    const results = await Promise.all(requests);
 
-    const data = await res.json();
-    console.log(`[Codex Debug] ✅ API 回傳成功！`, data.daily);
-
-    const d = data.daily;
-    if (!d || !d.time) throw new Error('No daily data');
-    const codes = d.weather_code || d.weathercode || [];
-    
-    WEATHER = d.time.map((dateStr, i) => {
-      const code = codes[i];
+    // Step 4: 整合結果（單日失敗 → 沿用該日的 fallback；資料齊全 → 用 API 結果）
+    const newWeather = results.map((r, i) => {
+      const fb = CONFIG.weatherFallback[i];
+      const coordLabel = `${(+r.coord.lat).toFixed(3)}, ${(+r.coord.lng).toFixed(3)}`;
+      if (!r.ok || !r.data?.daily?.time?.length) {
+        return fb ? { ...fb, coordLabel } : null;
+      }
+      const d = r.data.daily;
+      const code = (d.weather_code || d.weathercode || [])[0];
       const [icon, desc] = WMO_MAP[code] ?? ['🌡','—'];
-      const rain = d.precipitation_probability_max[i];
-      const dt = new Date(dateStr);
+      const rain = d.precipitation_probability_max?.[0];
+      const dt = new Date(d.time[0]);
       return {
         date: `${dt.getMonth()+1}/${dt.getDate()}`,
-        day: `Day ${i+1}`,
+        day: r.day.day,
         icon,
-        high: Math.round(d.temperature_2m_max[i]),
-        low:  Math.round(d.temperature_2m_min[i]),
+        high: Math.round(d.temperature_2m_max[0]),
+        low:  Math.round(d.temperature_2m_min[0]),
         desc,
         rain: rain != null ? `降雨機率 ${rain}%` : '—',
         live: true,
+        coordLabel,
       };
-    });
-    renderWeather();
-    
+    }).filter(Boolean);
+
+    if (newWeather.length) {
+      WEATHER = newWeather;
+      renderWeather();
+    }
   } catch(e) {
-    // 當發生異常（如日期超過 16 天），啟用 Fallback 並標示原因
-    console.warn('[Codex Debug] ⚠️ 天氣 API 執行失敗，已自動切換至歷史平均 Fallback。', e);
+    console.warn('[Weather] ⚠️ 整體查詢失敗，沿用 fallback。', e);
   }
 }
 
@@ -373,8 +376,9 @@ function switchTab(tab, el) {
 
 function renderWeather() {
   const bar = document.getElementById('weather-bar');
+  bar.style.gridTemplateColumns = `repeat(${WEATHER.length || 1}, 1fr)`;
   bar.innerHTML = WEATHER.map(w => `
-    <div class="weather-day">
+    <div class="weather-day"${w.coordLabel ? ` title="查詢座標：${w.coordLabel}"` : ''}>
       <div class="w-date"><b>${w.day}</b> ${w.date}</div>
       <div class="w-icon">${w.icon}</div>
       <div class="w-temp">${w.high}° / ${w.low}°</div>

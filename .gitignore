@@ -6,6 +6,7 @@ Thumbs.db
 .vscode/
 .idea/
 *.swp
+.claude/
 
 # Logs
 *.log
@@ -16,3 +17,10 @@ node_modules/
 
 # Vercel
 .vercel
+
+# wrangler files
+.wrangler
+.dev.vars*
+!.dev.vars.example
+.env*
+!.env.example
