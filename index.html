@@ -188,8 +188,9 @@ const CONFIG = {
   weatherEndDate:   '2026-05-03',
   weatherLatitude:  35.0116,
   weatherLongitude: 135.7681,
-  // 天氣模型：jma_seamless(日本) / icon_seamless(歐洲) / gfs_seamless(美洲) / best_match(全球混合)
-  weatherModel: 'jma_seamless',
+  // 天氣模型：best_match 由 Open-Meteo 依座標自動挑當地最佳模型（推薦）
+  // 強制指定可填：jma_seamless(日本) / cma_grapes_global(中國) / icon_seamless(歐洲) / gfs_seamless(美洲)
+  weatherModel: 'best_match',
 
   dayColors: ['#E8642A', '#5a8a5a', '#2a6a9a', '#c8860a', '#7b5ea7'],
 
