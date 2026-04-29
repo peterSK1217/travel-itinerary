@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(gh pr create --base main --head fix/weather-per-day-query --title 'fix\\(weather\\): 每日獨立查詢 + 改用 jma_seamless 模型' --body ' *)",
-      "PowerShell(Get-Command gh -ErrorAction SilentlyContinue)",
-      "PowerShell($paths = @\\(\"$env:LOCALAPPDATA\\\\Programs\\\\GitHub CLI\\\\gh.exe\", \"$env:ProgramFiles\\\\GitHub CLI\\\\gh.exe\", \"${env:ProgramFiles\\(x86\\)}\\\\GitHub CLI\\\\gh.exe\"\\); $paths | Where-Object { Test-Path $_ })"
-    ]
-  }
-}
